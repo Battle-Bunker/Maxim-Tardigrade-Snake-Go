@@ -119,97 +119,152 @@ func floodFill(start Coord, board Board, dangerZones map[Coord]bool) int {
 }
 
 func move(state GameState) BattlesnakeMoveResponse {
-	myHead := state.You.Body[0] // Coordinates of your head
+    myHead := state.You.Body[0]
+    myLength := state.You.Length
 
-	// Initialize safe moves
-	isMoveSafe := map[string]bool{
-		UP:    true,
-		DOWN:  true,
-		LEFT:  true,
-		RIGHT: true,
-	}
+    isMoveSafe := map[string]bool{
+        UP:    true,
+        DOWN:  true,
+        LEFT:  true,
+        RIGHT: true,
+    }
 
-	// Check wall collisions
-	if myHead.X == 0 {
-		isMoveSafe[LEFT] = false
-	} else if myHead.X == state.Board.Width-1 {
-		isMoveSafe[RIGHT] = false
-	}
+    // Check wall collisions
+    if myHead.X == 0 {
+        isMoveSafe[LEFT] = false
+    } else if myHead.X == state.Board.Width-1 {
+        isMoveSafe[RIGHT] = false
+    }
+    if myHead.Y == 0 {
+        isMoveSafe[DOWN] = false
+    } else if myHead.Y == state.Board.Height-1 {
+        isMoveSafe[UP] = false
+    }
 
-	if myHead.Y == 0 {
-		isMoveSafe[DOWN] = false
-	} else if myHead.Y == state.Board.Height-1 {
-		isMoveSafe[UP] = false
-	}
+    dangerZones := detectDanger(state)
 
-	dangerZones := detectDanger(state)
+    directions := map[string]Coord{
+        UP:    {X: myHead.X, Y: myHead.Y + 1},
+        DOWN:  {X: myHead.X, Y: myHead.Y - 1},
+        LEFT:  {X: myHead.X - 1, Y: myHead.Y},
+        RIGHT: {X: myHead.X + 1, Y: myHead.Y},
+    }
 
-	// Check self and other snakes using the dangerZones map
-	directions := map[string]Coord{
-		UP:    {X: myHead.X, Y: myHead.Y + 1},
-		DOWN:  {X: myHead.X, Y: myHead.Y - 1},
-		LEFT:  {X: myHead.X - 1, Y: myHead.Y},
-		RIGHT: {X: myHead.X + 1, Y: myHead.Y},
-	}
+    headToHeadMoves := make(map[string]bool)
 
-	for direction, newHead := range directions {
-		if isMoveSafe[direction] && (dangerZones[newHead] || floodFill(newHead, state.Board, dangerZones) < state.You.Length) {
-			isMoveSafe[direction] = false
-		}
-	}
+    for direction, newHead := range directions {
+        if isMoveSafe[direction] {
+            if dangerZones[newHead] {
+                // Check if it's a potential head-to-head collision
+                isHeadToHead := false
+                for _, snake := range state.Board.Snakes {
+                    if snake.ID != state.You.ID && ManhattanDistance(snake.Head, newHead) == 1 {
+                        if snake.Length <= myLength {
+                            isHeadToHead = true
+                            break
+                        }
+                    }
+                }
+                if isHeadToHead {
+                    headToHeadMoves[direction] = true
+                } else {
+                    isMoveSafe[direction] = false
+                }
+            } else if floodFill(newHead, state.Board, dangerZones) < myLength {
+                isMoveSafe[direction] = false
+            }
+        }
+    }
 
-	// Determine safe moves
-	safeMoves := []string{}
-	for move, safe := range isMoveSafe {
-		if safe {
-			safeMoves = append(safeMoves, move)
-		}
-	}
+    // Prioritize head-to-head moves if no safe moves are available
+    if len(headToHeadMoves) > 0 && allMovesUnsafe(isMoveSafe) {
+        for move := range headToHeadMoves {
+            return BattlesnakeMoveResponse{Move: move}
+        }
+    }
 
-	// No safe moves
-	if len(safeMoves) == 0 {
-		log.Printf("MOVE %d: No safe moves detected :( Moving up\n", state.Turn)
-		return BattlesnakeMoveResponse{Move: UP}
-	}
+    // Continue with the existing logic for choosing the best move
+    safeMoves := getSafeMoves(isMoveSafe)
+    if len(safeMoves) == 0 {
+        log.Printf("MOVE %d: No safe moves detected. Choosing a head-to-head or last resort move.\n", state.Turn)
+        return chooseLastResortMove(headToHeadMoves, isMoveSafe)
+    }
 
-	food := state.Board.Food
-	if len(food) > 0 {
-		closestFood := FindClosestFood(myHead, food)
-		dx := closestFood.X - myHead.X
-		dy := closestFood.Y - myHead.Y
+    // Existing food-seeking and flood fill logic
+    food := state.Board.Food
+    if len(food) > 0 {
+        closestFood := FindClosestFood(myHead, food)
+        if moveTowardsFood := getMoveTowardsFood(myHead, closestFood, isMoveSafe); moveTowardsFood != "" {
+            log.Printf("MOVE %d: Moving towards food %s\n", state.Turn, moveTowardsFood)
+            return BattlesnakeMoveResponse{Move: moveTowardsFood}
+        }
+    }
 
-		var moveTowardsFood string
+    bestMove := chooseBestMove(safeMoves, directions, state.Board, dangerZones)
+    log.Printf("MOVE %d: %s\n", state.Turn, bestMove)
+    return BattlesnakeMoveResponse{Move: bestMove}
+}
 
-		if dx > 0 && isMoveSafe[RIGHT] {
-			moveTowardsFood = RIGHT
-		} else if dx < 0 && isMoveSafe[LEFT] {
-			moveTowardsFood = LEFT
-		} else if dy > 0 && isMoveSafe[UP] {
-			moveTowardsFood = UP
-		} else if dy < 0 && isMoveSafe[DOWN] {
-			moveTowardsFood = DOWN
-		}
+func allMovesUnsafe(isMoveSafe map[string]bool) bool {
+    for _, safe := range isMoveSafe {
+        if safe {
+            return false
+        }
+    }
+    return true
+}
 
-		if moveTowardsFood != "" {
-			log.Printf("MOVE %d: Moving towards food %s\n", state.Turn, moveTowardsFood)
-			return BattlesnakeMoveResponse{Move: moveTowardsFood}
-		}
-	}
+func getSafeMoves(isMoveSafe map[string]bool) []string {
+    var safeMoves []string
+    for move, safe := range isMoveSafe {
+        if safe {
+            safeMoves = append(safeMoves, move)
+        }
+    }
+    return safeMoves
+}
 
-	// Choose the best move based on flood fill algorithm
-	bestMove := safeMoves[0]
-	maxArea := -1
-	for _, move := range safeMoves {
-		newHead := directions[move]
-		area := floodFill(newHead, state.Board, dangerZones)
-		if area > maxArea {
-			maxArea = area
-			bestMove = move
-		}
-	}
+func chooseLastResortMove(headToHeadMoves, isMoveSafe map[string]bool) BattlesnakeMoveResponse {
+    // Prefer head-to-head moves
+    for move := range headToHeadMoves {
+        return BattlesnakeMoveResponse{Move: move}
+    }
+    // If no head-to-head moves, choose any move (even if unsafe)
+    for move := range isMoveSafe {
+        return BattlesnakeMoveResponse{Move: move}
+    }
+    // This should never happen, but just in case
+    return BattlesnakeMoveResponse{Move: UP}
+}
 
-	log.Printf("MOVE %d: %s\n", state.Turn, bestMove)
-	return BattlesnakeMoveResponse{Move: bestMove}
+func getMoveTowardsFood(myHead, closestFood Coord, isMoveSafe map[string]bool) string {
+    dx := closestFood.X - myHead.X
+    dy := closestFood.Y - myHead.Y
+
+    if dx > 0 && isMoveSafe[RIGHT] {
+        return RIGHT
+    } else if dx < 0 && isMoveSafe[LEFT] {
+        return LEFT
+    } else if dy > 0 && isMoveSafe[UP] {
+        return UP
+    } else if dy < 0 && isMoveSafe[DOWN] {
+        return DOWN
+    }
+    return ""
+}
+
+func chooseBestMove(safeMoves []string, directions map[string]Coord, board Board, dangerZones map[Coord]bool) string {
+    bestMove := safeMoves[0]
+    maxArea := -1
+    for _, move := range safeMoves {
+        newHead := directions[move]
+        area := floodFill(newHead, board, dangerZones)
+        if area > maxArea {
+            maxArea = area
+            bestMove = move
+        }
+    }
+    return bestMove
 }
 
 func main() {
