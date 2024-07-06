@@ -172,30 +172,27 @@ func move(state GameState) BattlesnakeMoveResponse {
 		return BattlesnakeMoveResponse{Move: UP}
 	}
 
-	// Move towards food if low health
-	if state.You.Health < 50 {
-		food := state.Board.Food
-		if len(food) > 0 {
-			closestFood := FindClosestFood(myHead, food)
-			dx := closestFood.X - myHead.X
-			dy := closestFood.Y - myHead.Y
+	food := state.Board.Food
+	if len(food) > 0 {
+		closestFood := FindClosestFood(myHead, food)
+		dx := closestFood.X - myHead.X
+		dy := closestFood.Y - myHead.Y
 
-			var moveTowardsFood string
+		var moveTowardsFood string
 
-			if dx > 0 && isMoveSafe[RIGHT] {
-				moveTowardsFood = RIGHT
-			} else if dx < 0 && isMoveSafe[LEFT] {
-				moveTowardsFood = LEFT
-			} else if dy > 0 && isMoveSafe[UP] {
-				moveTowardsFood = UP
-			} else if dy < 0 && isMoveSafe[DOWN] {
-				moveTowardsFood = DOWN
-			}
+		if dx > 0 && isMoveSafe[RIGHT] {
+			moveTowardsFood = RIGHT
+		} else if dx < 0 && isMoveSafe[LEFT] {
+			moveTowardsFood = LEFT
+		} else if dy > 0 && isMoveSafe[UP] {
+			moveTowardsFood = UP
+		} else if dy < 0 && isMoveSafe[DOWN] {
+			moveTowardsFood = DOWN
+		}
 
-			if moveTowardsFood != "" {
-				log.Printf("MOVE %d: Moving towards food %s\n", state.Turn, moveTowardsFood)
-				return BattlesnakeMoveResponse{Move: moveTowardsFood}
-			}
+		if moveTowardsFood != "" {
+			log.Printf("MOVE %d: Moving towards food %s\n", state.Turn, moveTowardsFood)
+			return BattlesnakeMoveResponse{Move: moveTowardsFood}
 		}
 	}
 
